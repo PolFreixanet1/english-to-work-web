@@ -8611,6 +8611,7 @@ function renderTemario() {
                   class="lesson-go btn-secondary rounded-xl px-4 text-xs font-semibold"
                   aria-label="${esc((isEs ? 'Ejercicios de ' : 'Exercises for ') + u.title)}">${esc(position === 'Current'
                     ? (isEs ? 'Continuar' : 'Continue')
+                    : pr.status === 'passed' ? (isEs ? 'Repasar' : 'Review')
                     : learning.solved > 0 ? (isEs ? 'Seguir' : 'Resume') : (isEs ? 'Ejercicios' : 'Exercises'))}</button>`;
               /* La fila abre la leccion; el boton de al lado va directo a sus
                  ejercicios. Pedido: "el temario con los temas y la posibilidad
@@ -18218,7 +18219,7 @@ window.addEventListener('pagehide',()=>{ayClose();clearTimeout(AY_REMINDER_TIMER
 .az-week-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0}
 .az-week-grid > div {display:grid;padding:10px 12px;border-radius:var(--r-lg,12px);background:rgb(var(--surface-sunken))}
 .az-week-grid strong {font-size:24px;line-height:1.1}.az-week-grid span {font-size:var(--fs-footnote,13px);color:rgb(var(--text-secondary))}
-.az-week button[data-az-week-start] {width:100%;min-height:52px;margin-top:12px}
+.az-week {padding:12px 0 0;border-top:1px solid rgb(var(--border))}.az-week .az-week-grid {margin:8px 0}.az-week .az-week-grid > div {padding:6px 10px}.az-week .az-week-grid strong {font-size:18px}.az-week p.text-sm {margin:2px 0}.az-week button[data-az-week-start] {margin-top:6px;min-height:36px}
 @media(min-width:1024px){.az-week-grid {grid-template-columns:repeat(4,minmax(0,1fr))}}
 .az-rest {margin:0;font-size:var(--fs-footnote,13px);color:rgb(var(--text-secondary))}
 #azProgressHeader .az-plan {margin:4px 0 0;font-size:var(--fs-footnote,13px);color:rgb(var(--text-secondary))}
@@ -18426,13 +18427,19 @@ details > .bb-brief {margin-top:12px;box-shadow:none}
 /* 30-sep, Pol: «en el móvil se ve cortado en la parte de lecciones». The lesson row and its
    «Continuar/Ejercicios» button sat side by side and pushed the row 40 px past the screen. */
 .lesson-li .lesson-row {max-width:100%}
+/* 30-sep, Pol's phone: the «Ahora» highlight stopped short on the right (the row's
+   -12px margin shifted it) and «Continuar» hung below it, outside. On phones the whole
+   list item is the block: one highlight edge to edge, button inside, under the text. */
 @media (max-width:640px){
- .lesson-li {flex-wrap:wrap;gap:0;padding-bottom:10px}
- .lesson-li .lesson-row {flex:1 1 100%;width:100%}
- .lesson-li .lesson-go {margin-left:52px}
+ .lesson-li {flex-wrap:wrap;gap:0;margin:0 -12px;padding:0 0 14px;border-radius:var(--r-md)}
+ .lesson-li .lesson-row {flex:1 1 100%;width:100%;margin:0;padding-bottom:10px}
+ .lesson-li .lesson-row[data-position="Current"] {background:transparent}
+ .lesson-li:has(> .lesson-row[data-position="Current"]) {background-color:rgb(var(--accent-soft) / .55);border-bottom-color:transparent}
+ .lesson-li .lesson-go {margin-left:52px;min-height:36px;padding:0 16px}
 }
 [data-az-surface][data-inline="on"] {margin-bottom:16px}
 [data-az-surface][data-inline="on"] > header [data-ax-close],[data-az-surface][data-inline="on"] > header [data-ay-close] {display:inline-flex}
+@media (max-width:640px){.az-home aside .az-week .az-week-grid {grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.az-home aside .az-week .az-week-grid > div {padding:6px}.az-home aside .az-week .az-week-grid strong {font-size:16px}.az-home aside .az-week .az-week-grid span {font-size:12px;line-height:1.2}}
 </style>
 <script>
 /* AZ: one path, one execution frame. Existing runners retain their own grading
@@ -18684,14 +18691,18 @@ async function azWeekly(host){
  if(!r||seen===r.week_start||!(Number(r.minutes)>0||Number(r.days)>0)||!host.isConnected||host.querySelector('.az-week'))return;
  const card=host.querySelector('.feature-card');const pct=Number(r.answers)?Math.round(Number(r.correct)/Number(r.answers)*100):null;
  const fmt=d=>new Date(d+'T00:00:00').toLocaleDateString(state.uiLang==='es'?'es-ES':'en-GB',{day:'numeric',month:'short'});
- const week=document.createElement('section');week.className='feature-card az-week';
- week.innerHTML=`<p class="eyebrow">${azText('Tu semana','Your week')} · ${esc(fmt(r.week_start))}–${esc(fmt(r.week_end))}</p><h2>${azText('Así fue tu semana pasada','Here is last week')}</h2>
+ /* 30-sep, Pol: «al principio sale una cosa de tu curso y se cambia muy rápido». The
+    report arrives ~2 s after Today and used to REPLACE the course card. It is now a
+    quiet summary under it: the top of the screen never changes, one primary stays. */
+ const week=document.createElement('section');week.className='az-week';
+ week.innerHTML=`<p class="eyebrow">${azText('Tu semana pasada','Last week')} · ${esc(fmt(r.week_start))}–${esc(fmt(r.week_end))}</p>
   <div class="az-week-grid">${[[r.minutes,azText('minutos','minutes')],[r.days,azText('días cumplidos','goal days')],[r.new_phrases,azText('frases nuevas','new phrases')],[r.patterns_practised,azText('errores trabajados con acierto','mistakes practised right')]].map(([n,l])=>`<div><strong>${Number(n)||0}</strong><span>${l}</span></div>`).join('')}</div>
   ${pct!=null?`<p class="text-sm">${azText(`Acertaste el ${pct} % de ${r.answers} respuestas.`,`You got ${pct}% of ${r.answers} answers right.`)}</p>`:''}
   <p class="text-sm">${azText('Esta semana: ','This week: ')}${esc(azNextGoalText())}</p>
-  <button class="btn-primary" data-az-week-start>${azText('Empezar la semana','Start the week')}</button>`;
- card.hidden=true;host.prepend(week);
- week.querySelector('[data-az-week-start]').onclick=()=>{try{localStorage.setItem(key,r.week_start);}catch{}week.remove();card.hidden=false;azCourseGo();};
+  <button class="btn-tertiary" data-az-week-start>${azText('Entendido','Got it')}</button>`;
+ // Inside the side card: on a phone it sits under the course card, on desktop in its column.
+ const aside=host.querySelector(':scope > aside');if(aside)aside.append(week);else card.after(week);
+ week.querySelector('[data-az-week-start]').onclick=()=>{try{localStorage.setItem(key,r.week_start);}catch{}week.remove();card.querySelector('[data-az-course],.btn-primary')?.focus({preventScroll:true});};
 }
 function azNextGoalText(){
  const p=typeof azPlanInfo==='function'?azPlanInfo(window.AZ_PLAN_TO_TARGET??null,0):null;
