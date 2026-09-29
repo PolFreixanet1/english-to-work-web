@@ -10340,7 +10340,7 @@ function lessonPathState(unitId, isEs) {
   const html = pasos.map(p => {
     const esActual = actual && actual.n === p.n;
     return `<li class="rounded-xl border px-3 py-3 ${esActual ? 'border-accent bg-accent-soft/40' : 'border-line'}" ${esActual ? 'aria-current="step"' : ''}>
-      <p class="text-xs font-semibold ${p.hecho ? 'text-secondary' : esActual ? 'text-accent' : 'text-ink-faint'}">${p.hecho ? '✓' : p.n} · ${esc(p.t)}</p>
+      <p class="text-xs font-semibold ${p.hecho ? 'text-secondary' : esActual ? 'text-accent' : 'text-ink-faint'}"><span class="whitespace-nowrap">${p.hecho ? '✓' : p.n}&nbsp;${esc(p.t)}</span></p>
       <p class="text-xs text-ink-soft mt-0.5">${esc(p.d)}</p></li>`;
   }).join('');
   return { pr, umbral, leida, practicaHecha, aprobada, pasos, actual, html };
@@ -13718,7 +13718,29 @@ const FORMAT_GROUP_LABELS = Object.freeze({
   match_group: ['Match', 'Emparejar']
 });
 
+/* 30-sep, Pol: «en los ejercicios de práctica, en algunos grupos solo existen de un tipo».
+   At an A1-A2 level «Clauses & Comparison» had 2 exercises, both translations. A folder
+   with fewer than 8 exercises at your level (or fewer than 3 types, when no type was
+   chosen) is completed with the neighbouring level — the next one up first, then the one
+   below — and says so. The list, its count and the round all use this same function. */
+const EXTRA_WIDEN_MIN = 8;
+const EXTRA_NEIGHBOURS = Object.freeze({ a1a2: ['b1'], b1: ['b2c1', 'a1a2'], b2c1: ['b1'] });
 function extraExercises(area, format, level, folder) {
+  const own = extraExercisesAtLevel(area, format, level, folder);
+  if (!folder || folder === EXTRA_ANY || !level || level === EXTRA_ANY || format === 'writing') return own;
+  const kinds = items => new Set(items.map(ex => ex.type)).size;
+  const thin = items => items.length < EXTRA_WIDEN_MIN || (format === EXTRA_ANY && kinds(items) < 3);
+  if (!thin(own)) return own;
+  let out = own.slice(); const added = [];
+  for (const near of EXTRA_NEIGHBOURS[level] || []) {
+    if (!thin(out)) break;
+    const more = extraExercisesAtLevel(area, format, near, folder).filter(ex => !out.some(o => o.id === ex.id));
+    if (more.length) { out = out.concat(more); added.push(near); }
+  }
+  out.widenedWith = added;
+  return out;
+}
+function extraExercisesAtLevel(area, format, level, folder) {
   const areas = exerciseAreas();
   const lvl = level || EXTRA_ANY;
   const fld = folder || EXTRA_ANY;
@@ -13793,8 +13815,10 @@ function extraFolders(area, format, level) {
     });
   });
   const isEs = state.uiLang === 'es';
-  return [...porSkill.entries()].map(([skillId, items]) => {
+  return [...porSkill.entries()].map(([skillId, own]) => {
     const skill = SKILL_LOOKUP[skillId];
+    // Same widening as the folder's own list and round (extraExercises).
+    const items = skillId === '__sin_tema__' ? own : extraExercises(area, format, level, skillId);
     return {
       id: skillId,
       label: skill && skill.name ? skill.name
@@ -13809,7 +13833,8 @@ function extraFolders(area, format, level) {
          buscar; lo hecho sigue estando, pero no estorba. */
       items: items.slice().sort((a, b) =>
         Number(!!state.exercisesCorrect[a.id]) - Number(!!state.exercisesCorrect[b.id])),
-      done: items.filter(ex => state.exercisesCorrect[ex.id]).length
+      done: items.filter(ex => state.exercisesCorrect[ex.id]).length,
+      widenedWith: items.widenedWith || []
     };
   }).sort((a, b) => Number(a.done === a.items.length) - Number(b.done === b.items.length)
     || b.items.length - a.items.length || a.label.localeCompare(b.label));
@@ -13944,7 +13969,12 @@ function renderExtraPicker(isEs) {
   document.getElementById('extraWritingList').innerHTML = '';
   document.getElementById('extraWritingRunner').hidden = true;
 
-  const folders = extraFolders(EXTRA_AREA, EXTRA_FORMAT, EXTRA_LEVEL);
+  /* A folder that stays tiny even with the neighbouring level (a topic that barely
+     belongs to this tab) is not listed as a folder of its own: it would be 2-4 exercises
+     of one kind. They are still in «Mezclar todo» and in the tab where the topic lives. */
+  const EXTRA_FOLDER_MIN = 5;
+  const allFolders = extraFolders(EXTRA_AREA, EXTRA_FORMAT, EXTRA_LEVEL);
+  const folders = allFolders.length > 3 ? allFolders.filter(f => f.items.length >= EXTRA_FOLDER_MIN) : allFolders;
   const total = extraExercises(EXTRA_AREA, EXTRA_FORMAT, EXTRA_LEVEL, EXTRA_ANY).length;
 
   if (!total) {
@@ -14030,7 +14060,9 @@ function renderExtraFolder(isEs) {
           (EXTRA_TABS.find(t => t.id === EXTRA_TAB) || {})[isEs ? 'es' : 'en'],
           EXTRA_FORMAT === EXTRA_ANY || EXTRA_FORMAT === 'writing' ? null : exerciseFormatLabel(EXTRA_FORMAT, isEs),
           EXTRA_LEVEL === EXTRA_ANY ? (isEs ? 'todos los niveles' : 'every level') : extraLevelLabel(EXTRA_LEVEL, isEs)
-        ].filter(Boolean).join(' · '))}</p>
+        ].filter(Boolean).join(' · '))}</p>${(folder.widenedWith || []).length ? `<p class="text-xs text-ink-soft mt-1" data-folder-widened>${esc(isEs
+          ? `A tu nivel había pocos; incluye también ${folder.widenedWith.map(l => extraLevelLabel(l, true)).join(' y ')} para que haya variedad.`
+          : `There were few at your level; it also includes ${folder.widenedWith.map(l => extraLevelLabel(l, false)).join(' and ')} for variety.`)}</p>` : ''}
       </div>
       ${escritura || !folder.items.length ? '' : `<button type="button" id="extraFolderStart" class="btn-primary rounded-xl px-5 py-3 text-sm shrink-0">${
         isEs ? 'Empezar una ronda' : 'Start a round'}</button>`}
@@ -17683,7 +17715,7 @@ function axDialog(title) {
   axClose();
   const focus=document.activeElement, suspended=azSuspended();
   suspended.forEach(d=>d.close());
-  const dialog=azCreateSurface();dialog.id='axDialog';dialog.className='surface-card';
+  const dialog=azCreateSurface();dialog.id='axDialog';dialog.className='surface-card';dialog.dataset.inlineable='';
   dialog.setAttribute('aria-labelledby','axTitle');
   dialog.innerHTML=`<header class="flex items-center justify-between gap-3"><h2 id="axTitle" tabindex="-1" class="text-xl font-semibold">${esc(title)}</h2><button type="button" class="btn-tertiary" data-ax-close>${axText('Cerrar','Close')}</button></header><div data-ax-host class="mt-4"></div>`;
   document.body.append(dialog);dialog.showModal();dialog.querySelector('#axTitle').focus();
@@ -17747,7 +17779,7 @@ function axRenderText(view) {
     main=`<section class="mt-4" data-ax-summary><h3>${hits} / ${t.questions.length} ${axText('aciertos','correct')}</h3><button class="btn-primary mt-3" data-ax-enroll>${axText('Añadir bloques nuevos a mi repaso','Add new chunks to my review')}</button><p data-ax-status role="status"></p><button class="btn-tertiary mt-3" data-ax-list>${axText('Volver a los textos','Back to texts')}</button></section>`;
   }else if(!view.showQuestions){main=`<button class="btn-primary mt-4" data-ax-questions>${axText('Responder preguntas','Answer questions')}</button>`;}
   else {const q=t.questions[view.index];main=`<form data-ax-question class="mt-4"><p class="eyebrow">${view.index+1} / ${t.questions.length}</p><h3 id="axQuestionPrompt" lang="en" class="text-lg font-semibold">${esc(q.prompt)}</h3>${q.type==='mc'?`<fieldset class="ax-options" aria-labelledby="axQuestionPrompt">${(q.options||[]).map((a,i)=>`<label><input type="radio" name="axanswer" value="${esc(a)}" required ${view.feedback?'disabled':''}> <span lang="en">${esc(a)}</span></label>`).join('')}</fieldset>`:`<label class="block mt-3">${axText('Tu respuesta en inglés','Your answer in English')}<input class="block w-full" data-answer required autocomplete="off" ${view.feedback?'disabled':''}></label>`}
-      ${view.feedback?`<div role="status" class="mt-3"><p>${view.feedback.correct?axText('Correcto','Correct'):axText('Todavía no','Not quite')}</p><p lang="en">${esc(view.feedback.accepted.join(' / '))}</p><p>${esc(view.feedback.explanation_es)}</p>${ayReportButton('text',t.id+':'+view.index)}</div><button type="button" class="btn-primary mt-3" data-ax-next>${axText('Continuar','Continue')}</button>`:`<button class="btn-primary mt-3" type="submit">${axText('Comprobar','Check')}</button>`}<p data-ax-status role="status"></p></form>`;}
+      ${view.feedback?`<div class="mt-3">${axFeedbackBox(view.feedback.correct,view.feedback.answer,(view.feedback.accepted||[]).join(' / '),view.feedback.explanation_es)}${ayReportButton('text',t.id+':'+view.index)}</div><button type="button" class="btn-primary mt-3" data-ax-next>${axText('Continuar','Continue')}</button>`:`<button class="btn-primary mt-3" type="submit">${axText('Comprobar','Check')}</button>`}<p data-ax-status role="status"></p></form>`;}
   view.host.innerHTML=`<h3 class="text-lg font-semibold" lang="en">${esc(t.title)}</h3><p class="text-sm text-ink-soft">${esc(t.context_es)}</p>${audio}${transcript}${main}`;
   view.host.querySelectorAll('[data-ax-gloss]').forEach(b=>b.onclick=()=>{view.host.querySelector('[data-ax-meaning]').textContent=t.glossary.find(g=>g.id===b.dataset.axGloss).meaning_es;});
   view.host.querySelector('[data-ax-play]')?.addEventListener('click',()=>view.audio.toggle());
@@ -17760,7 +17792,7 @@ function axRenderText(view) {
     // Exact pending request remains unchanged after a network failure.
     view.pending ||= {p_run_id:t.run_id,p_question:view.index,p_answer:answer};
     try {const result=await axRpc('text_answer',view.pending);if(AX_VIEW!==view)return;
-      view.pending=null;view.feedback=result;view.results.push(result);DAILY_GOAL_STALE=true;axRenderText(view);
+      view.feedback={...result,answer:view.pending.p_answer};view.pending=null;view.results.push(result);DAILY_GOAL_STALE=true;axRenderText(view);
     }catch(error){axFailure(view);button.disabled=false;}finally{view.busy=false;}
   });
   view.host.querySelector('[data-ax-next]')?.addEventListener('click',()=>{view.index++;view.feedback=null;axRenderText(view);if(view.index===t.questions.length){checkDailyGoal({force:true,celebrate:false});loadStudentModel();}});
@@ -17795,6 +17827,15 @@ function axAudio(script,view) {
   }
   return api;
 }
+/* 30-sep, Pol: «cuando se hacen ejercicios sueltos, si es correcto o no debería verse como
+   en los ejercicios de las lecciones». Chunks, vocabulary recall and text questions said
+   only «Correcto» / «Vamos a repasarlo» as a heading. They now use the lesson box: green
+   «✓ ¡Correcto!», or red «Tu respuesta · Correcto» with the explanation. */
+function axFeedbackBox(correct, answer, right, explain) {
+  const extra = explain ? `<div class="mt-2">${esc(explain)}</div>` : '';
+  if (correct) return `<div class="feedback-correct rounded-lg p-3 text-sm text-on-secondary-fixed-variant" role="status" data-ax-verdict="correct"><span class="runner-check" aria-hidden="true">✓</span> ${axText('¡Correcto!','Correct!')} <strong lang="en">${esc(right)}</strong>${extra}</div>`;
+  return `<div class="feedback-incorrect rounded-lg p-3 text-sm text-on-error-container" role="status" data-ax-verdict="wrong"><div data-answer-diff><span>${esc(runnerText('aqanswer'))}: <s lang="en">${esc(answer || '—')}</s></span> · <span>${esc(runnerText('aqcorrect'))}: <mark lang="en">${esc(right)}</mark></span></div>${extra}</div>`;
+}
 async function openChunkReview() {
   const view=axDialog(axText('Bloques de trabajo','Work chunks'));await axNextChunk(view);
 }
@@ -17809,7 +17850,7 @@ async function axNextChunk(view) {
       view.chunkPending ||= {p_id:c.id,p_answer:answer,p_attempt_id:view.chunkAttempt};view.busy=true;const b=e.target.querySelector('button');b.disabled=true;
       try {const r=await axRpc('chunk_answer',view.chunkPending);if(AX_VIEW!==view)return;
         DAILY_GOAL_STALE=true;
-        view.host.innerHTML=`<h3>${r.correct?axText('Correcto','Correct'):axText('Vamos a repasarlo','Let’s review it')}</h3><p class="text-xl mt-3" lang="en">${esc(r.term)}</p><p class="ax-prose mt-3" lang="en">${esc(r.example)}</p>${ayReportButton('chunk',c.id)}<button class="btn-secondary mt-3" data-ax-example>${axText('Escuchar ejemplo','Listen to example')}</button><button class="btn-primary mt-3" data-ax-chunk-next>${axText('Continuar','Continue')}</button>`;
+        view.host.innerHTML=`<p class="eyebrow">${esc(c.meaning_es)}</p>${axFeedbackBox(r.correct,view.chunkPending?.p_answer,r.term,'')}<p class="ax-prose mt-3" lang="en">${esc(r.example)}</p>${ayReportButton('chunk',c.id)}<button class="btn-secondary mt-3" data-ax-example>${axText('Escuchar ejemplo','Listen to example')}</button><button class="btn-primary mt-3" data-ax-chunk-next>${axText('Continuar','Continue')}</button>`;
         view.host.querySelector('[data-ax-example]').onclick=()=>speak(r.example);
         view.host.querySelector('[data-ax-chunk-next]').onclick=()=>{if(typeof AZ_ACTIVE!=='undefined'&&AZ_ACTIVE){AZ_SESSION.count++;azSave();if(AZ_SESSION.count>=AZ_SESSION.steps[AZ_SESSION.index].limit)return azAdvance();}return axNextChunk(view);};
         if(typeof azAuto==='function')azAuto(view.host.querySelector('[data-ax-chunk-next]'),r.correct);
@@ -17832,7 +17873,8 @@ function axWireLegacy(host,v) {
   const form=host.querySelector('[data-ax-legacy]');if(!form||!v)return;
   form.onsubmit=async e=>{e.preventDefault();const input=form.querySelector('input'),b=form.querySelector('button');if(b.disabled||!input.value.trim())return;b.disabled=true;
     const ok=[v.term,String(v.term).replace(/^to /i,'')].some(a=>axNormalize(a)===axNormalize(input.value));
-    try {await recordVocabReview(v,ok);form.innerHTML=`<p>${ok?axText('Correcto','Correct'):axText('Vamos a repasarlo','Let’s review it')}</p><p lang="en">${esc(v.term)} · ${esc(v.example||'')}</p>${ayReportButton('vocabulary',v.id)}<button type="button" class="btn-secondary" data-ax-say>${axText('Escuchar ejemplo','Listen to example')}</button><button type="button" class="btn-primary" data-ax-continue>${axText('Continuar','Continue')}</button>`;
+    const typed=input.value.trim();
+    try {await recordVocabReview(v,ok);form.innerHTML=`${axFeedbackBox(ok,typed,v.term,'')}${v.example?`<p class="ax-prose mt-3" lang="en">${esc(v.example)}</p>`:''}${ayReportButton('vocabulary',v.id)}<button type="button" class="btn-secondary" data-ax-say>${axText('Escuchar ejemplo','Listen to example')}</button><button type="button" class="btn-primary" data-ax-continue>${axText('Continuar','Continue')}</button>`;
       form.querySelector('[data-ax-say]').onclick=()=>speak(v.example||v.term);form.querySelector('[data-ax-continue]').onclick=()=>{if(typeof AZ_ACTIVE!=='undefined'&&AZ_ACTIVE){AZ_SESSION.count++;azSave();if(AZ_SESSION.count>=AZ_SESSION.steps[AZ_SESSION.index].limit)return azAdvance();return azRun();}if(host.closest('#axDialog'))axClose();renderVocabGrid();};if(typeof azAuto==='function')azAuto(form.querySelector('[data-ax-continue]'),ok);checkDailyGoal({force:true,celebrate:false});
     }catch(error){b.disabled=false;b.textContent=axText('Reintentar','Retry');form.querySelector('[data-vocab-today-status]').textContent=axText('No se ha guardado. Reintenta.','Not saved. Retry.');}
   };
@@ -17850,7 +17892,7 @@ function ayFailure(view){ayStatus(view,ayText('No se ha podido guardar o cargar.
 function ayClose(){const v=AY_VIEW;if(!v)return;AY_VIEW=null;v.cleanups.forEach(f=>f());v.dialog.remove();v.suspended.forEach(d=>{if(d.isConnected)d.showModal();});v.focus?.focus();}
 function ayDialog(title,body){
  ayClose();const focus=document.activeElement,suspended=azSuspended();suspended.forEach(d=>d.close());
- const dialog=azCreateSurface();dialog.id='ayDialog';dialog.className='runner-dialog';dialog.setAttribute('aria-labelledby','ayTitle');
+ const dialog=azCreateSurface();dialog.id='ayDialog';dialog.className='runner-dialog';dialog.dataset.inlineable='';dialog.setAttribute('aria-labelledby','ayTitle');
  dialog.innerHTML=`<header class="flex items-center justify-between gap-3"><h2 id="ayTitle" class="text-xl font-semibold" tabindex="-1">${esc(title)}</h2><button type="button" class="btn-tertiary" data-ay-close>${ayText('Cerrar','Close')}</button></header><div class="ay-stack mt-4" data-ay-body>${body}<p role="status" aria-live="polite" data-ay-status></p></div>`;
  document.body.append(dialog);const v=AY_VIEW={dialog,host:dialog.querySelector('[data-ay-body]'),focus,suspended,cleanups:[],user:currentUser?.id};
  dialog.querySelector('[data-ay-close]').onclick=ayClose;dialog.addEventListener('cancel',e=>{e.preventDefault();ayClose();});dialog.showModal();dialog.querySelector('h2').focus();return v;
@@ -18381,6 +18423,16 @@ details > .bb-brief {margin-top:12px;box-shadow:none}
 .az-admin-pin {display:flex;gap:8px;align-items:center}
 .az-admin-pin input {width:9em}
 .az-admin > [data-admin-create] {justify-self:start}
+/* 30-sep, Pol: «en el móvil se ve cortado en la parte de lecciones». The lesson row and its
+   «Continuar/Ejercicios» button sat side by side and pushed the row 40 px past the screen. */
+.lesson-li .lesson-row {max-width:100%}
+@media (max-width:640px){
+ .lesson-li {flex-wrap:wrap;gap:0;padding-bottom:10px}
+ .lesson-li .lesson-row {flex:1 1 100%;width:100%}
+ .lesson-li .lesson-go {margin-left:52px}
+}
+[data-az-surface][data-inline="on"] {margin-bottom:16px}
+[data-az-surface][data-inline="on"] > header [data-ax-close],[data-az-surface][data-inline="on"] > header [data-ay-close] {display:inline-flex}
 </style>
 <script>
 /* AZ: one path, one execution frame. Existing runners retain their own grading
@@ -18428,8 +18480,18 @@ function azRestoreMounts(){for(const {node,marker}of AZ_MOUNTS){if(marker.parent
 function azCreateSurface(){
  const el=document.createElement('section');el.dataset.azSurface='';el.hidden=true;
  Object.defineProperty(el,'open',{get(){return !el.hidden;}});
- el.showModal=function(){const body=azShow(el.querySelector('h2,h3')?.textContent);for(const other of body.children)if(other!==el)other.hidden=true;body.append(el);el.hidden=false;el.dataset.open='';AZ_SURFACE=el;};
- el.close=function(){el.hidden=true;delete el.dataset.open;};return el;
+ /* 30-sep, Pol: exercises in the normal tab, not in a smaller window. Outside the guided
+    session an exercise surface (AX, AY: data-inlineable) takes the place of the current
+    tab's content and gives it back on close; the AI conversation keeps its own screen. */
+ let hiddenSiblings=null;
+ const restore=()=>{if(!hiddenSiblings)return;hiddenSiblings.forEach(n=>{n.hidden=false;});hiddenSiblings=null;delete el.dataset.inline;};
+ el.showModal=function(){
+  if(!AZ_ACTIVE&&el.dataset.inlineable!==undefined){const panel=document.querySelector('main .panel.active')||document.querySelector('main');
+   if(panel){restore();hiddenSiblings=[...panel.children].filter(n=>n!==el&&!n.hidden);hiddenSiblings.forEach(n=>{n.hidden=true;});panel.prepend(el);el.hidden=false;el.dataset.open='';el.dataset.inline='on';window.scrollTo({top:0,behavior:'instant'});return;}}
+  const body=azShow(el.querySelector('h2,h3')?.textContent);for(const other of body.children)if(other!==el)other.hidden=true;body.append(el);el.hidden=false;el.dataset.open='';AZ_SURFACE=el;};
+ el.close=function(){el.hidden=true;delete el.dataset.open;restore();};
+ const removeNode=el.remove.bind(el);el.remove=function(){restore();removeNode();};
+ return el;
 }
 function azSuspended(){return [...document.querySelectorAll('[data-az-surface][data-open],dialog[open]:not(#azFrame)')];}
 function azSnapshot(){
@@ -18735,7 +18797,9 @@ const azOldGoal=renderDailyGoal;renderDailyGoal=function(...args){const r=azOldG
 const azOldAyProgress=ayProgress;ayProgress=async function(){await azOldAyProgress();azProgressLayout();};
 const azOldCourse=renderTemario;renderTemario=function(){azOldCourse();const id=curriculumFocusUnitId(),b=document.getElementById('curriculumNowBtn');if(b&&id)b.textContent=azText('Seguir con la ','Continue with ')+lessonPositionLabel(id,state.uiLang==='es').toLowerCase();};
 const AZ_PRACTICE_TABS=new Set(['practicar','practica','extra','vocabulario','errores','scenarios','writing']);
-const azOldSetTab=setTab;setTab=function(tab,options={}){if(!AZ_TRANSITION&&AZ_MOUNTS.length)azRestoreMounts();if(!AZ_PRACTICE_TABS.has(tab))AZ_PRACTICE_OPEN=null;const result=azOldSetTab(tab,options);
+const azOldSetTab=setTab;setTab=function(tab,options={}){if(!AZ_TRANSITION&&AZ_MOUNTS.length)azRestoreMounts();
+ // An exercise open inside a tab ends when you go to another tab.
+ if(AX_VIEW?.dialog?.dataset.inline==='on')axClose();if(AY_VIEW?.dialog?.dataset.inline==='on')ayClose();if(!AZ_PRACTICE_TABS.has(tab))AZ_PRACTICE_OPEN=null;const result=azOldSetTab(tab,options);
  // Exercises open in the normal tab; the frame is only for the guided session.
  if(result&&currentTab==='practica'&&AZ_ACTIVE)azMount(document.getElementById('panel-practica'),practiceRunnerTitle());
  // Leaving the runner by a tab must not leave an empty frame on top of the new tab.
