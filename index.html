@@ -2195,6 +2195,7 @@ async function loadContent() {
       id: u.id, title: u.title, desc: u.description, desc_es: u.description_es,
       objective: u.objective, objectiveEs: u.objective_es,
       professionalSituations: u.professional_situations || [], professionalSituationsEs: u.professional_situations_es || [],
+      conversationSituation: u.conversation_situation || '', conversationSituationEs: u.conversation_situation_es || '',
       masteryCriteria: u.mastery_criteria, masteryCriteriaEs: u.mastery_criteria_es,
       learnerOutcome: (learnerOutcomesRes.data || []).find(row => row.unit_id === u.id
         && row.source_criteria === u.mastery_criteria && row.source_criteria_es === u.mastery_criteria_es) || null,
@@ -17388,7 +17389,9 @@ function openAIConversation(options = {}) {
   by('auMic').hidden=!supported;auLead();
   if (options.unit) {
     const unit=options.unit;
-    const situation=(state.uiLang === 'es' ? unit.professionalSituationsEs : unit.professionalSituations)?.[0] || unit.professionalSituations?.[0] || unit.title;
+    // BG: each lesson has a full situation (who the AI is, the context, the goal); the short label is the fallback.
+    const situation=(state.uiLang === 'es' ? unit.conversationSituationEs : unit.conversationSituation) || unit.conversationSituation
+      || (state.uiLang === 'es' ? unit.professionalSituationsEs : unit.professionalSituations)?.[0] || unit.professionalSituations?.[0] || unit.title;
     by('auScenario').value='custom';by('auCustomLabel').hidden=false;by('auCustom').value=String(situation || '').slice(0,600);
   }
   dialog.showModal();by('auScenario').focus();
